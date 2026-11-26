@@ -1,9 +1,1 @@
 
-Problems:
-1. Signing key: If the secrets are missing, the workflow makes a new key every run and deletes it after one day. Lose that key and you can't update your app on Google Play. The key is also downloadable from Actions. Fix: Create the keystore once locally, store it in the KEYSTORE_B64 and KEY_PASSWORD secrets, and make the workflow fail if they're missing.
-2. Version code: It's never increased, so Play rejects every upload after the first. Fix: Set versionCode from github.run_number before building.
-
-Minor:
-- cp of individual files breaks if any file is missing or other assets are needed. Use cp -r on your web folder.
-- The keytool password shows in the process list. Stored secrets fix this.
-- android/ is regenerated each run, so manual Android changes get lost. Commit it if you customize it.

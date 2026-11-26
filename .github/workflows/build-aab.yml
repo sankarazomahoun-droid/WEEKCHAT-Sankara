@@ -1,0 +1,93 @@
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare the Capacitor project
+        run: |
+          mkdir -p www
+          cp index.html privacy.html supabase-config.js www/
+          cat > package.json <<'EOF'
+          {
+            "name": "weekchat",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/core": "^6.0.0",
+              "@capacitor/cli": "^6.0.0",
+              "@capacitor/android": "^6.0.0"
+            }
+          }
+          EOF
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.weekchat.app",
+            "appName": "Weekchat",
+            "webDir": "www"
+          }
+          EOF
+          npm install
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+
+      - name: Prepare the signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > weekchat.jks
+            echo "$KEY_PASSWORD" > key_password.txt
+          else
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -keystore weekchat.jks -alias weekchat -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Weekchat, O=Weekchat, C=BJ" -noprompt
+            echo "$PASS" > key_password.txt
+            echo "FIRST_RUN=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the bundle
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease
+
+      - name: Sign the bundle
+        run: |
+          AAB=$(find android -name "*.aab" | grep release | head -n 1)
+          jarsigner -keystore weekchat.jks -storepass "$(cat key_password.txt)" -keypass "$(cat key_password.txt)" -sigalg SHA256withRSA -digestalg SHA-256 "$AAB" weekchat
+          cp "$AAB" weekchat-release.aab
+
+      - name: Save the app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekchat-aab
+          path: weekchat-release.aab
+          retention-days: 14
+
+      - name: Save the signing key (first run only)
+        if: env.FIRST_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key-keep-private
+          path: |
+            weekchat.jks
+            key_password.txt
+          retention-days: 1
